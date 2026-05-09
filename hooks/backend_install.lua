@@ -3,101 +3,47 @@
 --- @param ctx {tool: string, version: string, install_path: string} Context
 --- @return table Empty table on success
 function PLUGIN:BackendInstall(ctx)
-    local tool = ctx.tool
-    local version = ctx.version
-    local install_path = ctx.install_path
+    local cmd = require("cmd")
+    local json = require("json")
 
-    -- Validate inputs
+    local tool = ctx.tool
+    local version = ctx.version -- ignored
+    local install_path = ctx.install_path -- ignored
+    local brew_check = cmd.exec("command -v brew")
+
+    if not brew_check or brew_check == "" then
+        error("'brew' not found in $PATH")
+    end
+
     if not tool or tool == "" then
         error("Tool name cannot be empty")
     end
-    if not version or version == "" then
-        error("Version cannot be empty")
-    end
-    if not install_path or install_path == "" then
-        error("Install path cannot be empty")
-    end
 
-    -- Create installation directory
-    local cmd = require("cmd")
-    cmd.exec("mkdir -p " .. install_path)
+    local result = cmd.exec("brew info --json=v2 " .. tool .. " | jq '[.formulae.[].versions.stable, .casks.[].version]'")
 
-    -- Example implementations (choose/modify based on your backend):
-
-    -- Example 1: Package manager installation (like npm, pip)
-    local install_cmd = "<BACKEND> install " .. tool .. "@" .. version .. " --target " .. install_path
-    local result = cmd.exec(install_cmd)
-
-    if result:match("error") or result:match("failed") then
-        error("Failed to install " .. tool .. "@" .. version .. ": " .. result)
+    if not result or result == "" then
+        error("No formula or cask found for " .. tool)
     end
 
-    -- Example 2: Download and extract from URL
-    --[[
-    local http = require("http")
-    local file = require("file")
+    local versions = json.decode(result) or {}
 
-    -- Construct download URL (adjust based on your backend's URL pattern)
-    local platform = RUNTIME.osType:lower()
-    local arch = RUNTIME.archType
-    local download_url = "https://releases.<BACKEND>.org/" .. tool .. "/" .. version .. "/" .. tool .. "-" .. platform .. "-" .. arch .. ".tar.gz"
+    for i, v in pairs(versions) do
+        if v == version then break end
 
-    -- Download the tool
-    local temp_file = install_path .. "/" .. tool .. ".tar.gz"
-    local resp, err = http.download({
-        url = download_url,
-        output = temp_file
-    })
-
-    if err then
-        error("Failed to download " .. tool .. "@" .. version .. ": " .. err)
+        if i == #versions then
+            error("Homebrew only supports installing the following versions of " .. tool .. ": " .. table.concat(versions, ", "))
+        end
     end
 
-    -- Extract the archive
-    cmd.exec("cd " .. install_path .. " && tar -xzf " .. temp_file)
-    cmd.exec("rm " .. temp_file)
-
-    -- Set executable permissions
-    cmd.exec("chmod +x " .. install_path .. "/bin/" .. tool)
-    --]]
-
-    -- Example 3: Build from source
-    --[[
-    local git_url = "https://github.com/owner/" .. tool .. ".git"
-
-    -- Clone the repository
-    cmd.exec("git clone " .. git_url .. " " .. install_path .. "/src")
-    cmd.exec("cd " .. install_path .. "/src && git checkout " .. version)
-
-    -- Build the tool (adjust based on build system)
-    local build_result = cmd.exec("cd " .. install_path .. "/src && make install PREFIX=" .. install_path)
-
-    if build_result:match("error") then
-        error("Failed to build " .. tool .. "@" .. version)
+    if install_path and not install_path == "" then
+        warn("Homebrew backend installs to default prefix " .. cmd.exec("brew --prefix"))
     end
 
-    -- Clean up source
-    cmd.exec("rm -rf " .. install_path .. "/src")
-    --]]
+    if pcall(function () cmd.exec("brew list " .. tool) end) then return {} end
 
-    -- Platform-specific installation logic
-    --[[
-    if RUNTIME.osType == "Darwin" then
-        -- macOS-specific installation
-        local macos_cmd = "<BACKEND> install-macos " .. tool .. "@" .. version .. " " .. install_path
-        cmd.exec(macos_cmd)
-    elseif RUNTIME.osType == "Linux" then
-        -- Linux-specific installation
-        local linux_cmd = "<BACKEND> install-linux " .. tool .. "@" .. version .. " " .. install_path
-        cmd.exec(linux_cmd)
-    elseif RUNTIME.osType == "Windows" then
-        -- Windows-specific installation
-        local windows_cmd = "<BACKEND> install-windows " .. tool .. "@" .. version .. " " .. install_path
-        cmd.exec(windows_cmd)
-    else
-        error("Unsupported platform: " .. RUNTIME.osType)
+    if not pcall(function () cmd.exec("brew install " .. tool) end) then
+        error("Homebrew failed to install " .. tool)
     end
-    --]]
 
     return {}
 end
